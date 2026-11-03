@@ -41,6 +41,7 @@ unprivileged container with a read-only root filesystem.
 - [Operations](#operations)
 - [Repository layout](#repository-layout)
 - [Contributing](#contributing)
+- [License](#license)
 
 ## Quickstart
 
@@ -600,3 +601,8 @@ Dockerfile, docker-compose.yml, .github/workflows/ci.yml
   web UI records GitHub as the committer, which the audit rejects.
 - Keep caches and temporary files under `./.cache/`. Never commit absolute machine
   paths; the hygiene gates reject them.
+
+## License
+
+Released under the [MIT License](LICENSE) (SPDX: `MIT`).
+Copyright (c) 2026 mikeZ98.

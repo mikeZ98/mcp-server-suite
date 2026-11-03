@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # The project itself, installed as a regular (non-editable) wheel so the runtime
 # needs nothing from /build.
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock LICENSE ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
@@ -65,6 +65,7 @@ RUN set -eux; \
 FROM ${PYTHON_IMAGE} AS runtime
 
 LABEL org.opencontainers.image.title="mcp-server-suite" \
+      org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.description="Hardened MCP server over stdio: read-only SQL, sandboxed file reads, system metrics."
 
 # Unprivileged identity and the sandbox root, then strip the image down:

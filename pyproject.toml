@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Hardened Model Context Protocol (MCP) server suite: read-only SQL, sandboxed filesystem reads and system telemetry over JSON-RPC 2.0."
 authors = [{ name = "mikeZ98", email = "145975972+mikeZ98@users.noreply.github.com" }]
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",

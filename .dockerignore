@@ -2,6 +2,7 @@
 *
 !pyproject.toml
 !uv.lock
+!LICENSE
 !src
 
 # Never send these, even if the allowlist above is widened.
