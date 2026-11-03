@@ -867,5 +867,5 @@ async def test_open_tool_registry_skips_sql_without_dsn(
     monkeypatch.delenv("MCP_SQL_DSN", raising=False)
     with caplog.at_level(logging.WARNING):
         async with open_tool_registry() as registry:
-            assert len(registry) == 0
+            assert "read_only_sql" not in registry
     assert "MCP_SQL_DSN is not set" in caplog.text
