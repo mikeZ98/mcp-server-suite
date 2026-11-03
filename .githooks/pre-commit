@@ -15,8 +15,7 @@ mcp_check_identity "Committer" "$c_name" "$c_email" || fail=1
 
 # Staged paths that must never be committed.
 forbidden_paths="$(git diff --cached --name-only --diff-filter=ACMR |
-  grep -E '(^|/)(\.cache|\.venv|__pycache__|\.mypy_cache|\.ruff_cache|\.pytest_cache|\.hypothesis)/|(^|/)\.env(\..+)?$|(^|/)\.envrc\.local$|\.(pem|key|p12)$' |
-  grep -vE '(^|/)\.env\.example$' || true)"
+  grep -E "$MCP_FORBIDDEN_PATH_RE" | grep -vE "$MCP_ALLOWED_PATH_RE" || true)"
 if [[ -n "$forbidden_paths" ]]; then
   mcp_err "Refusing to commit cache, virtualenv or secret files:"
   sed 's/^/    /' <<<"$forbidden_paths" >&2
@@ -26,7 +25,7 @@ fi
 # Block absolute machine-specific paths from leaking into tracked content.
 path_leaks="$(git diff --cached -U0 --diff-filter=ACMR |
   grep -E '^\+[^+]' |
-  grep -nE '/(Volumes|Users)/[A-Za-z0-9_]|/home/[a-z_][a-z0-9_-]*/' || true)"
+  grep -nE "$MCP_PATH_LEAK_RE" || true)"
 if [[ -n "$path_leaks" ]]; then
   mcp_err "Staged changes contain absolute local paths:"
   sed 's/^/    /' <<<"$path_leaks" >&2

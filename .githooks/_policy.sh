@@ -1,8 +1,9 @@
 # shellcheck shell=bash
-# Shared commit policy for git hooks and scripts/audit-attribution.sh:
+# Shared commit policy for git hooks, scripts/audit-*.sh and CI:
 #   * sole-contributor identity (author + committer),
 #   * Conventional Commits subject line,
-#   * no tool-generated meta-trailers in commit messages.
+#   * no tool-generated meta-trailers in commit messages,
+#   * no cache/secret files or absolute machine paths in tracked content.
 # Sourced, never executed. Git ignores this file as a hook (not a hook name).
 
 readonly MCP_ALLOWED_NAME="mikeZ98"
@@ -12,6 +13,13 @@ readonly MCP_CONVENTIONAL_RE='^(feat|fix|chore|docs|test|build|ci|refactor|perf|
 
 # Case-insensitive patterns rejected anywhere in the message body.
 readonly MCP_FORBIDDEN_TRAILER_RE='^(co-authored-by|generated-by|signed-off-by-bot):|generated with \[?[a-z ]+\]?\(|🤖'
+
+# Tracked paths that must never be committed: caches, virtualenvs, secrets.
+readonly MCP_FORBIDDEN_PATH_RE='(^|/)(\.cache|\.venv|__pycache__|\.mypy_cache|\.ruff_cache|\.pytest_cache|\.hypothesis)/|(^|/)\.env(\..+)?$|(^|/)\.envrc\.local$|\.(pem|key|p12)$'
+readonly MCP_ALLOWED_PATH_RE='(^|/)\.env\.example$'
+
+# Absolute machine-specific paths that must not appear in tracked content.
+readonly MCP_PATH_LEAK_RE='/(Volumes|Users)/[A-Za-z0-9_]|/home/[a-z_][a-z0-9_-]*/'
 
 mcp_err() { printf '\033[31m✖ %s\033[0m\n' "$*" >&2; }
 mcp_ok() { printf '\033[32m✔ %s\033[0m\n' "$*" >&2; }
@@ -34,6 +42,11 @@ mcp_parse_ident() {
 # mcp_clean_message — strip comments and anything below the scissors line.
 mcp_clean_message() {
   sed -e '/^# ------------------------ >8 ------------------------$/,$d' -e '/^#/d'
+}
+
+# mcp_subject <message> — the first non-blank line, which is what gets checked.
+mcp_subject() {
+  sed -n '/[^[:space:]]/{p;q;}' <<<"$1"
 }
 
 # mcp_check_subject <first-line>

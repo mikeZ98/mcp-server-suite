@@ -8,6 +8,7 @@
 # Environment:
 #   SMOKE_IMAGE       image tag to build and test (default: mcp-server-suite:smoke)
 #   SMOKE_KEEP_IMAGE  set to 1 to keep the image afterwards
+#   SMOKE_SKIP_BUILD  set to 1 to test an already built SMOKE_IMAGE (kept afterwards)
 #   PYTHON            interpreter used to parse JSON (default: python3)
 #
 # Compatible with macOS /bin/bash 3.2 (no mapfile, no associative arrays).
@@ -322,9 +323,17 @@ if ((OFFLINE == 0)); then
     echo "Docker daemon unreachable; start one or rerun with --offline." >&2
     exit 2
   fi
-  section "Build $IMAGE"
-  DOCKER_BUILDKIT=1 docker build --tag "$IMAGE" .
-  created_image=1
+  if [[ "${SMOKE_SKIP_BUILD:-0}" == 1 ]]; then
+    if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+      echo "SMOKE_SKIP_BUILD=1 but image $IMAGE does not exist." >&2
+      exit 2
+    fi
+    section "Using prebuilt $IMAGE"
+  else
+    section "Build $IMAGE"
+    DOCKER_BUILDKIT=1 docker build --tag "$IMAGE" .
+    created_image=1
+  fi
   check_image_config
   check_runtime_profile
   check_handshake

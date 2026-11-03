@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+# Same layout as .envrc: every cache, virtualenv and temp file stays under
+# ./.cache/ in the workspace.
+env:
+  TMPDIR: ${{ github.workspace }}/.cache/tmp
+  XDG_CACHE_HOME: ${{ github.workspace }}/.cache/xdg
+  UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/.cache/uv-python
+  UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.cache/venv
+  UV_PYTHON_PREFERENCE: only-managed
+  UV_LINK_MODE: copy
+  PYTHONPYCACHEPREFIX: ${{ github.workspace }}/.cache/pycache
+  RUFF_CACHE_DIR: ${{ github.workspace }}/.cache/ruff
+  MYPY_CACHE_DIR: ${{ github.workspace }}/.cache/mypy
+  COVERAGE_FILE: ${{ github.workspace }}/.cache/coverage/.coverage
+  HYPOTHESIS_STORAGE_DIRECTORY: ${{ github.workspace }}/.cache/hypothesis
+
+jobs:
+  attribution-audit:
+    name: attribution-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Audit commit identity and messages
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            # The PR's own commits, not GitHub's synthetic merge commit.
+            range=("$PR_BASE..$PR_HEAD")
+          elif [[ "$PUSH_BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            # New branch or rewritten history: audit everything reachable.
+            range=("$PUSH_AFTER")
+          else
+            range=("$PUSH_BEFORE..$PUSH_AFTER")
+          fi
+          echo "Auditing ${range[*]}"
+          scripts/audit-attribution.sh "${range[@]}"
+
+      - name: Audit tracked files
+        run: scripts/audit-hygiene.sh
+
+  code-quality:
+    name: code-quality
+    needs: attribution-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up uv and Python 3.12
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.7"
+          python-version: "3.12"
+          enable-cache: true
+          cache-python: true
+          cache-dependency-glob: uv.lock
+          cache-local-path: ${{ github.workspace }}/.cache/uv
+
+      - name: Install locked dependencies
+        run: |
+          mkdir -p "$TMPDIR" "$(dirname "$COVERAGE_FILE")"
+          uv sync --locked
+          echo "$UV_PROJECT_ENVIRONMENT/bin" >>"$GITHUB_PATH"
+
+      - name: Ruff lint
+        run: ruff check --output-format=github .
+
+      - name: Ruff format
+        run: ruff format --check .
+
+      - name: Mypy (strict)
+        run: mypy src/ tests/ --strict
+
+      - name: Bandit
+        run: bandit -c pyproject.toml -r src/
+
+      - name: Tests (hermetic, CI fuzzing profile)
+        env:
+          HYPOTHESIS_PROFILE: ci
+        run: pytest --disable-socket --cov-fail-under=95
+
+      - name: Coverage gate on security-critical modules
+        run: scripts/coverage-gate.sh
+
+  container-security:
+    name: container-security
+    needs: attribution-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: mcp-server-suite:ci
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare cache directories
+        run: mkdir -p "$TMPDIR"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          tags: ${{ env.IMAGE }}
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Container smoke suite
+        env:
+          SMOKE_IMAGE: ${{ env.IMAGE }}
+          SMOKE_SKIP_BUILD: "1"
+        run: scripts/smoke-docker.sh
+
+      # Gate: any CRITICAL or HIGH vulnerability that has a fix available. Runs
+      # even when the smoke suite fails, so one run reports both.
+      - name: Trivy scan (gating)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.70.0
+          scan-type: image
+          image-ref: ${{ env.IMAGE }}
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+          cache-dir: ${{ github.workspace }}/.cache/trivy
+
+      # Visibility: CRITICAL/HIGH findings with no upstream fix yet.
+      - name: Trivy report (unfixed, informational)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.70.0
+          skip-setup-trivy: true
+          cache: false
+          scan-type: image
+          image-ref: ${{ env.IMAGE }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          format: table
+          exit-code: "0"
+          cache-dir: ${{ github.workspace }}/.cache/trivy

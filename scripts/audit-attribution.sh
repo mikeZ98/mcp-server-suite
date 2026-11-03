@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Audit commits for the sole-contributor identity invariant (author + committer)
-# and for tool-generated meta-trailers in commit messages.
+# Audit commits against the policy the local commit-msg hook enforces: the
+# sole-contributor identity (author + committer), a Conventional Commits subject
+# and no tool-generated meta-trailers.
 #
 # Usage: scripts/audit-attribution.sh [<git rev-list args>...]   (default: HEAD)
 # Used by .githooks/pre-push locally and by the CI attribution-audit job.
@@ -20,7 +21,9 @@ while IFS= read -r sha; do
   short="${sha:0:12}"
   mcp_check_identity "[$short] Author" "$an" "$ae" || fail=1
   mcp_check_identity "[$short] Committer" "$cn" "$ce" || fail=1
-  mcp_check_trailers "$(git log -1 --format='%B' "$sha")" || {
+  message="$(git log -1 --format='%B' "$sha")"
+  mcp_check_subject "$(mcp_subject "$message")" || fail=1
+  mcp_check_trailers "$message" || {
     mcp_err "[$short] message policy violation."
     fail=1
   }

@@ -8,7 +8,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 source "$ROOT/.githooks/_policy.sh"
 
 msg="$(mcp_clean_message <"$1")"
-subject="$(sed -n '/[^[:space:]]/{p;q;}' <<<"$msg")"
+subject="$(mcp_subject "$msg")"
 
 fail=0
 [[ -n "$subject" ]] || { mcp_err "Empty commit message."; exit 1; }
