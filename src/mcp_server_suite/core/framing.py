@@ -131,10 +131,14 @@ class FrameWriter:
         self._lock = asyncio.Lock()
 
     async def send(self, message: Mapping[str, Any]) -> None:
-        """Encode and write one message (raises ``OSError`` if the sink is broken)."""
-        data = json.dumps(message, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        """Encode and write one message (raises ``OSError`` if the sink is broken).
+
+        Output is ASCII-only JSON: non-ASCII text is ``\\uXXXX``-escaped, so lone
+        surrogates echoed from client input can never make encoding fail.
+        """
+        data = json.dumps(message, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
         async with self._lock:
-            await self._sink.write(data.encode("utf-8") + b"\n")
+            await self._sink.write(data.encode("ascii") + b"\n")
 
     async def aclose(self) -> None:
         """Flush and close the sink, tolerating an already-broken stream."""

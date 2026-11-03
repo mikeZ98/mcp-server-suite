@@ -389,13 +389,25 @@ def test_frame_reader_rejects_bad_limits(kwargs: dict[str, int]) -> None:
         FrameReader(ChunkSource(), **kwargs)
 
 
-async def test_frame_writer_emits_single_line_utf8() -> None:
+async def test_frame_writer_emits_single_ascii_line() -> None:
     sink = RecordingSink()
     writer = FrameWriter(sink)
-    await writer.send({"text": "line\nbreak", "emoji": "żółw"})
-    assert sink.frames == ['{"text":"line\\nbreak","emoji":"żółw"}\n'.encode()]
+    await writer.send({"text": "line\nbreak", "word": "\u017c\u00f3\u0142w", "lone": "\ud800"})
+    assert sink.frames == [
+        b'{"text":"line\\nbreak","word":"\\u017c\\u00f3\\u0142w","lone":"\\ud800"}\n'
+    ]
+    assert json.loads(sink.frames[0])["word"] == "\u017c\u00f3\u0142w"
     await writer.aclose()
     assert sink.closed
+
+
+async def test_lone_surrogate_in_request_cannot_crash_the_session(ready: Session) -> None:
+    """Regression: echoing an unpaired surrogate used to raise UnicodeEncodeError."""
+    ready.send_raw(b'{"jsonrpc":"2.0","id":1,"method":"x\\ud800"}\n')
+    response = await ready.receive()
+    assert_error(response, ErrorCode.METHOD_NOT_FOUND, 1)
+    assert response["error"]["message"] == "Method not found: x\ud800"
+    assert (await ready.call(2, "ping"))["id"] == 2
 
 
 async def test_frame_writer_close_tolerates_broken_sink() -> None:

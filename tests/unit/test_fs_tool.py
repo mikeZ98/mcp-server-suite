@@ -26,6 +26,7 @@ from mcp_server_suite.schemas import (
     SandboxFsReadResult,
 )
 from mcp_server_suite.tools import (
+    MetricsSettings,
     SandboxFsReadTool,
     SandboxSettings,
     SqlSettings,
@@ -650,12 +651,17 @@ async def test_io_crash_is_json_rpc_internal_error(
 # ---------------------------------------------------------------------------
 # Registry wiring
 # ---------------------------------------------------------------------------
-async def test_registry_exposes_both_tools(sandbox: Sandbox) -> None:
+async def test_registry_exposes_all_tools(sandbox: Sandbox) -> None:
     async with open_tool_registry(
         sql=SqlSettings(dsn=SecretStr("postgresql://reader@db.invalid/app")),
         fs=SandboxSettings(safe_data_dir=sandbox.root),
+        metrics=MetricsSettings(enabled=True),
     ) as registry:
-        assert [tool.name for tool in registry] == ["read_only_sql", "sandbox_fs_read"]
+        assert [tool.name for tool in registry] == [
+            "read_only_sql",
+            "sandbox_fs_read",
+            "system_metrics",
+        ]
 
 
 async def test_registry_skips_fs_without_root(

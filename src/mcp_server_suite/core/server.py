@@ -31,6 +31,7 @@ from mcp_server_suite.core.jsonrpc import (
     success,
 )
 from mcp_server_suite.core.registry import ToolError, ToolRegistry
+from mcp_server_suite.guardrails import Guardrails
 from mcp_server_suite.schemas import MCPErrorCode, ProblemDetail
 
 __all__ = [
@@ -79,7 +80,8 @@ class MCPServer:
     """Serve one MCP session: dispatch requests until EOF or shutdown, then drain.
 
     ``initialize``, ``ping`` and ``tools/list`` are answered inline, in arrival
-    order. Each ``tools/call`` runs as its own task so slow tools never block the
+    order. Each ``tools/call`` runs as its own task, through the guardrails
+    (sanitizer, concurrency limit, deadline), so slow tools never block the
     read loop, and so it can be cancelled by ``notifications/cancelled`` or at
     shutdown. Cancelled requests get no response, as the MCP spec requires.
 
@@ -89,9 +91,15 @@ class MCPServer:
     an RFC 9457 problem; unexpected crashes are JSON-RPC ``-32603``.
     """
 
-    def __init__(self, registry: ToolRegistry, config: ServerConfig | None = None) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry,
+        config: ServerConfig | None = None,
+        guardrails: Guardrails | None = None,
+    ) -> None:
         self._registry = registry
         self._config = config or ServerConfig()
+        self._guardrails = guardrails if guardrails is not None else Guardrails()
         self._handlers: dict[str, Callable[[Mapping[str, Any]], JsonObject]] = {
             "initialize": self._initialize,
             "ping": self._ping,
@@ -302,16 +310,10 @@ class MCPServer:
         if tool is None:
             raise _invalid_params(f"Unknown tool: {name[:_ECHO_LIMIT]!r}", "name")
         try:
-            result = await tool.invoke(arguments)
+            result = await self._guardrails.run(tool, arguments)
             text = result.model_dump_json()
         except ToolError as exc:
             return _tool_error_result(exc.problem)
-        except TimeoutError:
-            return _tool_error_result(
-                ProblemDetail.from_code(
-                    MCPErrorCode.EXECUTION_TIMEOUT, f"Tool {name!r} exceeded its deadline"
-                )
-            )
         except Exception:
             logger.exception("tool %r failed", name)
             problem = ProblemDetail.from_code(

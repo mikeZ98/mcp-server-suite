@@ -6,13 +6,16 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from mcp_server_suite.core.registry import ToolRegistry
 from mcp_server_suite.tools.fs import SandboxFsReadTool, SandboxSettings
+from mcp_server_suite.tools.metrics import MetricsSettings, SystemMetricsTool
 from mcp_server_suite.tools.sql import ReadOnlySqlTool, SqlSettings, enforce_read_only
 
 __all__ = [
+    "MetricsSettings",
     "ReadOnlySqlTool",
     "SandboxFsReadTool",
     "SandboxSettings",
     "SqlSettings",
+    "SystemMetricsTool",
     "enforce_read_only",
     "open_tool_registry",
 ]
@@ -22,15 +25,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def open_tool_registry(
-    *, sql: SqlSettings | None = None, fs: SandboxSettings | None = None
+    *,
+    sql: SqlSettings | None = None,
+    fs: SandboxSettings | None = None,
+    metrics: MetricsSettings | None = None,
 ) -> AsyncIterator[ToolRegistry]:
     """Build the registry of configured tools and release their resources on exit.
 
-    Each tool is registered only when its settings are present: ``read_only_sql``
-    needs ``MCP_SQL_DSN``, ``sandbox_fs_read`` needs ``MCP_SAFE_DATA_DIR``.
+    Each tool is registered only when configured: ``read_only_sql`` needs
+    ``MCP_SQL_DSN``, ``sandbox_fs_read`` needs ``MCP_SAFE_DATA_DIR``, and
+    ``system_metrics`` is on unless ``MCP_METRICS_ENABLED=false``.
     """
     sql_settings = sql if sql is not None else SqlSettings()
     fs_settings = fs if fs is not None else SandboxSettings()
+    metrics_settings = metrics if metrics is not None else MetricsSettings()
     registry = ToolRegistry()
     async with AsyncExitStack() as resources:
         if sql_settings.dsn is not None:
@@ -43,4 +51,8 @@ async def open_tool_registry(
             registry.register(SandboxFsReadTool(fs_settings).definition())
         else:
             logger.warning("MCP_SAFE_DATA_DIR is not set; sandbox_fs_read is disabled")
+        if metrics_settings.enabled:
+            registry.register(SystemMetricsTool(metrics_settings).definition())
+        else:
+            logger.info("MCP_METRICS_ENABLED is false; system_metrics is disabled")
         yield registry

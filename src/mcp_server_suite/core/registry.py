@@ -8,20 +8,13 @@ from typing import Any, Final
 
 from pydantic import ValidationError
 
+from mcp_server_suite.errors import ToolError
 from mcp_server_suite.schemas import MCPErrorCode, ProblemDetail, StrictModel
 
 __all__ = ["ToolDefinition", "ToolError", "ToolRegistry"]
 
 _TOOL_NAME_RE: Final = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _MAX_REPORTED_ERRORS: Final = 20
-
-
-class ToolError(Exception):
-    """Domain failure raised by a tool handler; reported to the client verbatim."""
-
-    def __init__(self, problem: ProblemDetail) -> None:
-        super().__init__(problem.detail)
-        self.problem = problem
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
