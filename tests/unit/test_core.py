@@ -19,6 +19,7 @@ from typing import Any
 import mcp_types
 import pytest
 
+from harness import in_band_problem, run_session, tool_call
 from mcp_server_suite import __main__ as entrypoint
 from mcp_server_suite.core import (
     LATEST_PROTOCOL_VERSION,
@@ -50,7 +51,9 @@ from mcp_server_suite.schemas import (
     ReadOnlySqlParams,
     SqlQueryResult,
     StrictModel,
+    ToolName,
 )
+from mcp_server_suite.tools import SandboxFsReadTool, SandboxSettings
 
 TIMEOUT = 5.0
 
@@ -1065,3 +1068,46 @@ def test_main_returns_130_on_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(entrypoint, "run_stdio", interrupted)
     assert entrypoint.main() == 130
+
+
+# ---------------------------------------------------------------------------
+# Tool names render as plain strings (regression: ToolName enum repr leaked)
+# ---------------------------------------------------------------------------
+def test_enum_tool_name_is_stored_as_plain_string() -> None:
+    tool = _echo_tool(ToolName.SYSTEM_METRICS, _echo)
+    assert type(tool.name) is str
+    assert tool.name == "system_metrics"
+    assert type(tool.spec["name"]) is str
+
+
+def test_validation_detail_uses_clean_tool_name() -> None:
+    tool = _echo_tool(ToolName.SANDBOX_FS_READ, _echo)
+    with pytest.raises(ToolError) as exc_info:
+        tool.parse_arguments({})
+    problem = exc_info.value.problem
+    assert problem.detail == "1 invalid argument(s) for tool 'sandbox_fs_read'"
+    assert "ToolName" not in json.dumps(problem.to_json_dict())
+
+
+async def test_wrong_result_type_message_uses_clean_tool_name() -> None:
+    tool = _echo_tool(ToolName.SYSTEM_METRICS, _wrong_type)
+    with pytest.raises(TypeError, match=r"^tool 'system_metrics' returned "):
+        await tool.invoke({"text": "x"})
+
+
+def test_duplicate_registration_message_uses_clean_tool_name() -> None:
+    registry = ToolRegistry([_echo_tool(ToolName.SYSTEM_METRICS, _echo)])
+    with pytest.raises(ValueError, match=r"^tool 'system_metrics' is already registered$"):
+        registry.register(_echo_tool(ToolName.SYSTEM_METRICS, _echo))
+
+
+async def test_real_tool_validation_problem_on_the_wire(tmp_path: Path) -> None:
+    tool = SandboxFsReadTool(SandboxSettings(safe_data_dir=tmp_path))
+    responses = await run_session(
+        ToolRegistry([tool.definition()]),
+        tool_call(1, "sandbox_fs_read", {"relative_path": "a.txt", "max_bytes": 0}),
+    )
+    problem = in_band_problem(responses[1], MCPErrorCode.VALIDATION_ERROR)
+    assert problem["detail"] == "1 invalid argument(s) for tool 'sandbox_fs_read'"
+    assert problem["invalid_params"] == ["max_bytes"]
+    assert "ToolName" not in responses[1]["result"]["content"][0]["text"]

@@ -20,7 +20,7 @@ from mcp_server_suite.guardrails import (
     find_forbidden_character,
     run_with_deadline,
 )
-from mcp_server_suite.schemas import MCPErrorCode, ProblemDetail, StrictModel
+from mcp_server_suite.schemas import MCPErrorCode, ProblemDetail, StrictModel, ToolName
 
 TIMEOUT = 5.0
 
@@ -617,3 +617,40 @@ async def test_cancelled_call_frees_its_slot() -> None:
     assert 1 not in sink.messages, "cancelled request gets no response"
     assert sink.messages[2]["result"]["structuredContent"] == {"text": "retry"}
     assert probe.cancelled == 1
+
+
+# ---------------------------------------------------------------------------
+# Tool names render as plain strings even when a ToolName member is passed
+# ---------------------------------------------------------------------------
+async def test_capacity_problem_uses_clean_tool_name() -> None:
+    limiter = ConcurrencyLimiter(max_concurrent=1, acquire_timeout=0)
+    async with limiter.slot(ToolName.SYSTEM_METRICS):
+        with pytest.raises(ToolError) as exc_info:
+            async with limiter.slot(ToolName.SYSTEM_METRICS):
+                pytest.fail("no second slot may be granted")
+    problem = problem_of(exc_info, MCPErrorCode.INTERNAL_ERROR)
+    assert problem.detail == (
+        "server is at capacity (1 concurrent tool calls); "
+        "'system_metrics' was not started, retry later"
+    )
+
+
+async def test_deadline_problem_uses_clean_tool_name() -> None:
+    async def slow() -> None:
+        await asyncio.sleep(60)
+
+    with pytest.raises(ToolError) as exc_info:
+        await asyncio.wait_for(run_with_deadline(slow, 0.01, ToolName.READ_ONLY_SQL), TIMEOUT)
+    problem = problem_of(exc_info, MCPErrorCode.EXECUTION_TIMEOUT)
+    assert problem.detail == "tool 'read_only_sql' exceeded its 0.01s deadline and was cancelled"
+
+
+async def test_inner_timeout_problem_uses_clean_tool_name() -> None:
+    async def times_out() -> None:
+        raise TimeoutError
+
+    with pytest.raises(ToolError) as exc_info:
+        await run_with_deadline(times_out, 1.0, ToolName.READ_ONLY_SQL)
+    assert problem_of(exc_info, MCPErrorCode.EXECUTION_TIMEOUT).detail == (
+        "tool 'read_only_sql' timed out"
+    )

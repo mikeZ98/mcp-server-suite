@@ -32,6 +32,10 @@ class ToolDefinition[P: StrictModel, R: StrictModel]:
     _spec: dict[str, Any] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        # Store a plain ``str``: a ``ToolName`` member would otherwise render as its
+        # enum repr wherever the name is formatted with ``!r`` (problem details,
+        # log lines, error messages).
+        object.__setattr__(self, "name", str(self.name))
         if not _TOOL_NAME_RE.fullmatch(self.name):
             msg = f"invalid tool name {self.name!r}"
             raise ValueError(msg)

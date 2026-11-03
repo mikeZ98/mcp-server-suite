@@ -70,7 +70,7 @@ class ConcurrencyLimiter:
         return ProblemDetail.from_code(
             MCPErrorCode.INTERNAL_ERROR,
             f"server is at capacity ({self._max} concurrent tool calls); "
-            f"{tool_name!r} was not started, retry later",
+            f"{str(tool_name)!r} was not started, retry later",
             metadata={
                 "reason": "capacity_exhausted",
                 "retryable": True,

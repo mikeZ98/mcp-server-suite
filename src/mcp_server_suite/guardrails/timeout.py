@@ -25,15 +25,16 @@ async def run_with_deadline[T](
     Raises:
         ToolError: ``MCP_EXECUTION_TIMEOUT``.
     """
+    name = str(tool_name)  # plain text even for a ``ToolName`` member
     try:
         async with asyncio.timeout(deadline_seconds) as scope:
             return await operation()
     except TimeoutError:
         hit_deadline = scope.expired()
         detail = (
-            f"tool {tool_name!r} exceeded its {deadline_seconds:g}s deadline and was cancelled"
+            f"tool {name!r} exceeded its {deadline_seconds:g}s deadline and was cancelled"
             if hit_deadline
-            else f"tool {tool_name!r} timed out"
+            else f"tool {name!r} timed out"
         )
         raise ToolError(
             ProblemDetail.from_code(
