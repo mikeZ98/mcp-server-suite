@@ -66,7 +66,8 @@ select = [
 ignore = ["PLR0913", "TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "PLR2004", "ARG001", "FBT"]
+# ARG002/ASYNC109: test doubles mirror third-party signatures (e.g. asyncpg timeout=).
+"tests/**" = ["S101", "S105", "S106", "PLR2004", "ARG001", "ARG002", "ASYNC109", "FBT"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["mcp_server_suite"]

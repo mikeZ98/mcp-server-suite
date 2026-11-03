@@ -5,7 +5,8 @@ import logging
 import os
 import sys
 
-from mcp_server_suite.core import MCPServer, ToolRegistry, run_stdio
+from mcp_server_suite.core import MCPServer, run_stdio
+from mcp_server_suite.tools import open_tool_registry
 
 LOG_LEVEL_ENV = "MCP_SERVER_SUITE_LOG_LEVEL"
 
@@ -19,12 +20,17 @@ def _configure_logging() -> None:
     )
 
 
+async def serve() -> None:
+    """Open the configured tools and serve them over stdio."""
+    async with open_tool_registry() as registry:
+        await run_stdio(MCPServer(registry))
+
+
 def main() -> int:
     """Run the server until stdin closes or SIGINT/SIGTERM arrives."""
     _configure_logging()
-    server = MCPServer(ToolRegistry())
     try:
-        asyncio.run(run_stdio(server))
+        asyncio.run(serve())
     except KeyboardInterrupt:
         return 130
     return 0

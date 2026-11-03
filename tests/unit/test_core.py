@@ -315,6 +315,23 @@ def assert_problem(response: dict[str, Any], code: MCPErrorCode, request_id: Any
     return data
 
 
+def assert_tool_problem(
+    response: dict[str, Any], code: MCPErrorCode, request_id: Any
+) -> dict[str, Any]:
+    """A tool execution error: ``isError`` result whose only content is the RFC 9457 problem."""
+    mcp_types.JSONRPCResponse.model_validate(response)
+    assert response["id"] == request_id
+    result = mcp_types.CallToolResult.model_validate(response["result"])
+    assert result.is_error is True
+    assert "structuredContent" not in response["result"]
+    (content,) = response["result"]["content"]
+    assert content["type"] == "text"
+    problem = ProblemDetail.model_validate_json(content["text"])
+    assert problem.code is code
+    data: dict[str, Any] = json.loads(content["text"])
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Framing
 # ---------------------------------------------------------------------------
@@ -664,7 +681,7 @@ async def test_tool_call_with_step2_schema(ready: Session) -> None:
 
 async def test_tool_call_arguments_default_to_empty(ready: Session) -> None:
     response = await ready.call(1, "tools/call", {"name": "echo"})
-    data = assert_problem(response, MCPErrorCode.VALIDATION_ERROR, 1)
+    data = assert_tool_problem(response, MCPErrorCode.VALIDATION_ERROR, 1)
     assert data["invalid_params"] == ["text"]
 
 
@@ -682,7 +699,7 @@ async def test_tool_argument_validation(
     ready: Session, arguments: dict[str, Any], invalid: list[str]
 ) -> None:
     response = await ready.tool(3, "read_only_sql", arguments)
-    data = assert_problem(response, MCPErrorCode.VALIDATION_ERROR, 3)
+    data = assert_tool_problem(response, MCPErrorCode.VALIDATION_ERROR, 3)
     assert data["invalid_params"] == invalid
     assert data["status"] == 422
     assert all(set(err) == {"loc", "type", "msg"} for err in data["metadata"]["errors"])
@@ -709,18 +726,18 @@ async def test_unknown_tool_message(ready: Session) -> None:
     assert response["error"]["message"] == "Unknown tool: 'nope'"
 
 
-async def test_tool_error_maps_to_taxonomy(ready: Session) -> None:
-    data = assert_problem(
+async def test_tool_error_is_in_band_is_error_result(ready: Session) -> None:
+    data = assert_tool_problem(
         await ready.tool(1, "denied", {"text": "x"}), MCPErrorCode.ACCESS_DENIED, 1
     )
     assert data["status"] == 403
     assert data["detail"] == "path escapes sandbox"
+    assert data["type"] == ERROR_TAXONOMY[MCPErrorCode.ACCESS_DENIED].type
 
 
-async def test_timeout_maps_to_execution_timeout(ready: Session) -> None:
+async def test_timeout_is_in_band_execution_timeout(ready: Session) -> None:
     response = await ready.tool(1, "too_slow", {"text": "x"})
-    assert_problem(response, MCPErrorCode.EXECUTION_TIMEOUT, 1)
-    assert response["error"]["code"] == -32003
+    assert assert_tool_problem(response, MCPErrorCode.EXECUTION_TIMEOUT, 1)["status"] == 504
 
 
 @pytest.mark.parametrize("tool", ["boom", "wrong_type"])

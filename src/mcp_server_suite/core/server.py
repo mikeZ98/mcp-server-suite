@@ -1,6 +1,7 @@
 """MCP request dispatcher and connection lifecycle over a framed byte stream."""
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -81,6 +82,11 @@ class MCPServer:
     order. Each ``tools/call`` runs as its own task so slow tools never block the
     read loop, and so it can be cancelled by ``notifications/cancelled`` or at
     shutdown. Cancelled requests get no response, as the MCP spec requires.
+
+    Error reporting follows the MCP split: protocol faults (unknown tool, malformed
+    ``tools/call`` envelope) are JSON-RPC errors; tool execution errors (invalid
+    arguments, policy violations, timeouts) are ``isError: true`` results carrying
+    an RFC 9457 problem; unexpected crashes are JSON-RPC ``-32603``.
     """
 
     def __init__(self, registry: ToolRegistry, config: ServerConfig | None = None) -> None:
@@ -297,15 +303,15 @@ class MCPServer:
             raise _invalid_params(f"Unknown tool: {name[:_ECHO_LIMIT]!r}", "name")
         try:
             result = await tool.invoke(arguments)
-            structured = result.model_dump(mode="json")
             text = result.model_dump_json()
         except ToolError as exc:
-            raise JsonRpcError.from_problem(exc.problem) from None
+            return _tool_error_result(exc.problem)
         except TimeoutError:
-            problem = ProblemDetail.from_code(
-                MCPErrorCode.EXECUTION_TIMEOUT, f"Tool {name!r} exceeded its deadline"
+            return _tool_error_result(
+                ProblemDetail.from_code(
+                    MCPErrorCode.EXECUTION_TIMEOUT, f"Tool {name!r} exceeded its deadline"
+                )
             )
-            raise JsonRpcError.from_problem(problem) from None
         except Exception:
             logger.exception("tool %r failed", name)
             problem = ProblemDetail.from_code(
@@ -314,6 +320,19 @@ class MCPServer:
             raise JsonRpcError.from_problem(problem) from None
         return {
             "content": [{"type": "text", "text": text}],
-            "structuredContent": structured,
+            # Decoded from the JSON text so both views are identical and strictly JSON-safe.
+            "structuredContent": json.loads(text),
             "isError": False,
         }
+
+
+def _tool_error_result(problem: ProblemDetail) -> JsonObject:
+    """Tool execution error, reported in-band so the calling model can self-correct.
+
+    Only the RFC 9457 problem is returned (as JSON text); ``structuredContent`` is
+    omitted because it would not conform to the tool's ``outputSchema``.
+    """
+    return {
+        "content": [{"type": "text", "text": json.dumps(problem.to_json_dict())}],
+        "isError": True,
+    }
