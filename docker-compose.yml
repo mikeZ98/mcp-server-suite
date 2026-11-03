@@ -1,0 +1,52 @@
+# Local sandbox deployment of the MCP server over stdio.
+#
+#   docker compose build
+#   docker compose run --rm -T mcp-server < requests.jsonl
+#
+# `-T` keeps the session off a TTY, which would rewrite the newline-delimited
+# JSON-RPC stream. Files served by sandbox_fs_read live in the `safe-data`
+# volume, which the server mounts read-only.
+name: mcp-server-suite
+
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${MCP_IMAGE:-mcp-server-suite:local}
+    user: "10001:10001"
+    stdin_open: true
+    tty: false
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # No network by default. To enable read_only_sql, replace this with a
+    # network that reaches PostgreSQL and pass MCP_SQL_DSN (a SELECT-only role).
+    network_mode: none
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      - type: volume
+        source: safe-data
+        target: /safe_data_dir
+        read_only: true
+    environment:
+      MCP_SAFE_DATA_DIR: /safe_data_dir
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+          pids: 64
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+    memswap_limit: 256M
+    stop_signal: SIGTERM
+    # Covers the server's 5 s drain of in-flight tool calls.
+    stop_grace_period: 10s
+    restart: "no"
+
+volumes:
+  safe-data: {}

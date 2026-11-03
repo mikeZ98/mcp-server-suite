@@ -1,0 +1,23 @@
+# Allowlist: the build context holds only what the image is built from.
+*
+!pyproject.toml
+!uv.lock
+!src
+
+# Never send these, even if the allowlist above is widened.
+.git
+.github
+.cache
+.envrc
+.envrc.local
+.env
+.env.*
+.githooks
+tests
+docs
+scripts
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
