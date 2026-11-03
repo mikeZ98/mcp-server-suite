@@ -34,7 +34,7 @@ env:
 jobs:
   attribution-audit:
     name: attribution-audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Check out full history
@@ -69,7 +69,7 @@ jobs:
   code-quality:
     name: code-quality
     needs: attribution-audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out
@@ -116,7 +116,7 @@ jobs:
   container-security:
     name: container-security
     needs: attribution-audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       IMAGE: mcp-server-suite:ci

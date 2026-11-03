@@ -236,3 +236,9 @@ def test_workflow_runs_the_shared_local_gates() -> None:
 def test_workflow_never_checks_out_with_persisted_credentials() -> None:
     checkouts = WORKFLOW_TEXT.count("uses: actions/checkout@")
     assert checkouts == WORKFLOW_TEXT.count("persist-credentials: false")
+
+
+def test_workflow_pins_every_runner_to_a_versioned_image() -> None:
+    runners = re.findall(r"^\s*runs-on:\s*(\S+)\s*$", WORKFLOW_TEXT, re.MULTILINE)
+    assert runners
+    assert [runner for runner in runners if not re.fullmatch(r"ubuntu-\d{2}\.\d{2}", runner)] == []
