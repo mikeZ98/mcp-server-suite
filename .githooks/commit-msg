@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# commit-msg: enforce Conventional Commits, reject meta-trailers and re-validate
+# author + committer identity (covers --author, --amend).
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck source=_policy.sh
+source "$ROOT/.githooks/_policy.sh"
+
+msg="$(mcp_clean_message <"$1")"
+subject="$(sed -n '/[^[:space:]]/{p;q;}' <<<"$msg")"
+
+fail=0
+[[ -n "$subject" ]] || { mcp_err "Empty commit message."; exit 1; }
+mcp_check_subject "$subject" || fail=1
+mcp_check_trailers "$msg" || fail=1
+
+IFS=$'\t' read -r a_name a_email <<<"$(mcp_parse_ident "$(git var GIT_AUTHOR_IDENT)")"
+IFS=$'\t' read -r c_name c_email <<<"$(mcp_parse_ident "$(git var GIT_COMMITTER_IDENT)")"
+mcp_check_identity "Author" "$a_name" "$a_email" || fail=1
+mcp_check_identity "Committer" "$c_name" "$c_email" || fail=1
+
+exit "$fail"

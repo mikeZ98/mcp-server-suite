@@ -1,0 +1,32 @@
+# Pinned caches, venv, temp (see .envrc)
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Secrets & local overrides
+.env
+.env.*
+!.env.example
+.envrc.local
+*.pem
+*.key
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+.claude/settings.local.json

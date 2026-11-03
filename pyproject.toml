@@ -1,0 +1,132 @@
+[project]
+name = "mcp-server-suite"
+version = "0.1.0"
+description = "Hardened Model Context Protocol (MCP) server suite: read-only SQL, sandboxed filesystem reads and system telemetry over JSON-RPC 2.0."
+authors = [{ name = "mikeZ98", email = "145975972+mikeZ98@users.noreply.github.com" }]
+requires-python = ">=3.12"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Framework :: AsyncIO",
+  "Topic :: Security",
+  "Typing :: Typed",
+]
+dependencies = [
+  "mcp>=2.3",
+  "asyncpg>=0.32",
+  "pydantic>=2.14",
+  "pydantic-settings>=2.6",
+  "sqlglot>=30.0",
+  "psutil>=7.2",
+  "anyio>=4.6",
+]
+
+[project.scripts]
+mcp-server-suite = "mcp_server_suite.__main__:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=9.0",
+  "pytest-asyncio>=1.0",
+  "pytest-cov>=7.0",
+  "pytest-socket>=0.7",
+  "hypothesis>=6.120",
+  "ruff>=0.17",
+  "mypy>=2.4",
+  "asyncpg-stubs>=0.32",
+  "types-psutil>=7.2",
+  "bandit[toml]>=1.9",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[build-system]
+requires = ["hatchling>=1.33"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_server_suite"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+cache-dir = ".cache/ruff"
+
+[tool.ruff.lint]
+select = [
+  "E", "W", "F", "I", "N", "UP", "B", "A", "C4", "S", "SIM", "PT", "RET",
+  "ARG", "PTH", "PL", "RUF", "ASYNC", "TRY", "PERF", "FBT", "T20", "BLE", "ERA",
+]
+ignore = ["PLR0913", "TRY003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "PLR2004", "ARG001", "FBT"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mcp_server_suite"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+cache_dir = ".cache/mypy"
+mypy_path = "src"
+packages = ["mcp_server_suite"]
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# ---------------------------------------------------------------------------
+# Pytest / coverage (hermetic: sockets disabled, no live PostgreSQL)
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+cache_dir = ".cache/pytest"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--disable-socket",
+  "--allow-unix-socket",
+  "--cov=mcp_server_suite",
+  "--cov-branch",
+  "--cov-report=term-missing",
+]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["mcp_server_suite"]
+data_file = ".cache/coverage/.coverage"
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = false
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
+
+# ---------------------------------------------------------------------------
+# Bandit
+# ---------------------------------------------------------------------------
+[tool.bandit]
+targets = ["src"]
+exclude_dirs = ["tests", ".cache"]

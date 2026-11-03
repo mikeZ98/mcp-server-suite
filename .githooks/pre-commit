@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# pre-commit: enforce contributor identity, block cache/secret files, lint staged Python.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck source=_policy.sh
+source "$ROOT/.githooks/_policy.sh"
+
+fail=0
+
+IFS=$'\t' read -r a_name a_email <<<"$(mcp_parse_ident "$(git var GIT_AUTHOR_IDENT)")"
+IFS=$'\t' read -r c_name c_email <<<"$(mcp_parse_ident "$(git var GIT_COMMITTER_IDENT)")"
+mcp_check_identity "Author" "$a_name" "$a_email" || fail=1
+mcp_check_identity "Committer" "$c_name" "$c_email" || fail=1
+
+# Staged paths that must never be committed.
+forbidden_paths="$(git diff --cached --name-only --diff-filter=ACMR |
+  grep -E '(^|/)(\.cache|\.venv|__pycache__|\.mypy_cache|\.ruff_cache|\.pytest_cache|\.hypothesis)/|(^|/)\.env(\..+)?$|(^|/)\.envrc\.local$|\.(pem|key|p12)$' |
+  grep -vE '(^|/)\.env\.example$' || true)"
+if [[ -n "$forbidden_paths" ]]; then
+  mcp_err "Refusing to commit cache, virtualenv or secret files:"
+  sed 's/^/    /' <<<"$forbidden_paths" >&2
+  fail=1
+fi
+
+# Block absolute machine-specific paths from leaking into tracked content.
+path_leaks="$(git diff --cached -U0 --diff-filter=ACMR |
+  grep -E '^\+[^+]' |
+  grep -nE '/(Volumes|Users)/[A-Za-z0-9_]|/home/[a-z_][a-z0-9_-]*/' || true)"
+if [[ -n "$path_leaks" ]]; then
+  mcp_err "Staged changes contain absolute local paths:"
+  sed 's/^/    /' <<<"$path_leaks" >&2
+  fail=1
+fi
+
+# Ruff on staged Python files (the tools live in the uv venv under .cache/).
+# Plain read loop instead of mapfile: stays compatible with macOS /bin/bash 3.2.
+py_files=()
+while IFS= read -r f; do
+  py_files+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACMR -- '*.py' '*.pyi')
+if ((${#py_files[@]} > 0)); then
+  ruff_bin="${UV_PROJECT_ENVIRONMENT:-$ROOT/.cache/venv}/bin/ruff"
+  if [[ -x "$ruff_bin" ]]; then
+    "$ruff_bin" check --quiet -- "${py_files[@]}" || fail=1
+    "$ruff_bin" format --check --quiet -- "${py_files[@]}" || fail=1
+  else
+    mcp_err "ruff not found at $ruff_bin — run 'uv sync' (with direnv loaded)."
+    fail=1
+  fi
+fi
+
+exit "$fail"
