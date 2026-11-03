@@ -67,7 +67,8 @@ ignore = ["PLR0913", "TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
 # ARG002/ASYNC109: test doubles mirror third-party signatures (e.g. asyncpg timeout=).
-"tests/**" = ["S101", "S105", "S106", "PLR2004", "ARG001", "ARG002", "ASYNC109", "FBT"]
+# S608: tests build hostile SQL strings on purpose.
+"tests/**" = ["S101", "S105", "S106", "S608", "PLR2004", "ARG001", "ARG002", "ASYNC109", "FBT"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["mcp_server_suite"]
@@ -82,7 +83,7 @@ docstring-code-format = true
 python_version = "3.12"
 strict = true
 cache_dir = ".cache/mypy"
-mypy_path = "src"
+mypy_path = "src:tests"
 packages = ["mcp_server_suite"]
 plugins = ["pydantic.mypy"]
 warn_unreachable = true
@@ -99,7 +100,11 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests"]
+pythonpath = ["tests"]
 cache_dir = ".cache/pytest"
+markers = [
+  "e2e: spawns the real server as a subprocess over stdio pipes",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = [
@@ -120,7 +125,7 @@ source = ["mcp_server_suite"]
 data_file = ".cache/coverage/.coverage"
 
 [tool.coverage.report]
-fail_under = 90
+fail_under = 95
 show_missing = true
 skip_covered = false
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]

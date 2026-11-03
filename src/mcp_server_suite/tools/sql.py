@@ -35,7 +35,7 @@ import sqlglot
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlglot import exp
-from sqlglot.errors import ParseError, TokenError
+from sqlglot.errors import ParseError, SqlglotError, TokenError
 
 from mcp_server_suite.core.registry import ToolDefinition, ToolError
 from mcp_server_suite.schemas import (
@@ -258,11 +258,21 @@ def enforce_read_only(query: str, *, max_rows: int = SQL_MAX_ROWS_LIMIT) -> Enfo
 
     Raises:
         ToolError: ``MCP_QUERY_VIOLATION`` for policy breaches,
-            ``MCP_VALIDATION_ERROR`` for unparseable SQL.
+            ``MCP_VALIDATION_ERROR`` for SQL that cannot be parsed or analysed
+            (including pathological nesting that exhausts the parser's recursion).
     """
     if not 1 <= max_rows <= SQL_MAX_ROWS_LIMIT:
         msg = f"max_rows must be within 1..{SQL_MAX_ROWS_LIMIT}"
         raise ValueError(msg)
+    try:
+        return _enforce(query, max_rows)
+    except RecursionError:
+        raise _syntax_error("query is nested too deeply to analyse") from None
+    except SqlglotError as exc:
+        raise _syntax_error(f"query could not be analysed ({type(exc).__name__})") from None
+
+
+def _enforce(query: str, max_rows: int) -> EnforcedQuery:
     root = _check_tree(_parse_single(query))
 
     existing = root.args.get("limit")

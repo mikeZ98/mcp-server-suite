@@ -16,9 +16,12 @@ from uuid import UUID
 import asyncpg
 import mcp_types
 import pytest
+import sqlglot
 from pydantic import SecretStr, ValidationError
+from sqlglot.errors import UnsupportedError
 
-from mcp_server_suite.core import MCPServer, ToolError, ToolRegistry
+from harness import in_band_problem, run_session, tool_call
+from mcp_server_suite.core import ToolError, ToolRegistry
 from mcp_server_suite.schemas import (
     ERROR_TAXONOMY,
     MCPErrorCode,
@@ -324,6 +327,23 @@ def test_parse_error_reports_position() -> None:
     problem = violation("SELECT * FROM", MCPErrorCode.VALIDATION_ERROR)
     assert problem.detail.startswith("SQL syntax error:")
     assert problem.metadata["line"] == 1
+
+
+def test_pathological_nesting_is_a_validation_error() -> None:
+    """Fuzz regression: deep nesting exhausted sqlglot's recursion (RecursionError)."""
+    query = "SELECT " + "(" * 3000 + "1" + ")" * 3000
+    assert len(query) <= 10_000, "reachable through the 10k-character schema limit"
+    problem = violation(query, MCPErrorCode.VALIDATION_ERROR)
+    assert problem.detail == "query is nested too deeply to analyse"
+
+
+def test_unexpected_sqlglot_failure_is_a_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unsupported(*args: Any, **kwargs: Any) -> Any:
+        raise UnsupportedError("generator cannot render this")
+
+    monkeypatch.setattr(sqlglot, "parse", unsupported)
+    problem = violation("SELECT 1", MCPErrorCode.VALIDATION_ERROR)
+    assert problem.detail == "query could not be analysed (UnsupportedError)"
 
 
 @pytest.mark.parametrize("query", ["SELECT * FROM t WHERE id = $1", "SELECT * FROM t LIMIT $1"])
@@ -707,54 +727,15 @@ async def test_create_asyncpg_pool_requires_dsn() -> None:
 # ---------------------------------------------------------------------------
 # MCP protocol conformance (through MCPServer)
 # ---------------------------------------------------------------------------
-INIT = {
-    "jsonrpc": "2.0",
-    "id": "init",
-    "method": "initialize",
-    "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t"}},
-}
-
-
 def call(request_id: int, arguments: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": "tools/call",
-        "params": {"name": "read_only_sql", "arguments": arguments},
-    }
-
-
-class Collector:
-    def __init__(self) -> None:
-        self.messages: list[dict[str, Any]] = []
-
-    async def write(self, data: bytes, /) -> None:
-        self.messages.append(json.loads(data))
-
-    async def aclose(self) -> None:
-        return None
+    return tool_call(request_id, "read_only_sql", arguments)
 
 
 async def exchange(tool: ReadOnlySqlTool, messages: Iterable[dict[str, Any]]) -> dict[Any, Any]:
-    reader = asyncio.StreamReader()
-    for message in (INIT, *messages):
-        reader.feed_data(json.dumps(message).encode() + b"\n")
-    reader.feed_eof()
-    sink = Collector()
-    server = MCPServer(ToolRegistry([tool.definition()]))
-    await asyncio.wait_for(server.serve(reader, sink), TIMEOUT)
-    return {message["id"]: message for message in sink.messages}
+    return await run_session(ToolRegistry([tool.definition()]), *messages)
 
 
-def tool_problem(response: dict[str, Any], code: MCPErrorCode) -> dict[str, Any]:
-    result = mcp_types.CallToolResult.model_validate(response["result"])
-    assert result.is_error is True
-    assert "structuredContent" not in response["result"]
-    (content,) = response["result"]["content"]
-    problem = ProblemDetail.model_validate_json(content["text"])
-    assert problem.code is code
-    data: dict[str, Any] = json.loads(content["text"])
-    return data
+tool_problem = in_band_problem
 
 
 async def test_tools_list_advertises_read_only_sql(tool: ReadOnlySqlTool) -> None:

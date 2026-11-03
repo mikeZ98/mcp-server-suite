@@ -6,10 +6,10 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import mcp_types
 import pytest
 from pydantic import ValidationError
 
+from harness import Collector, in_band_problem, initialize, tool_call
 from mcp_server_suite.core import MCPServer, ToolDefinition, ToolError, ToolRegistry
 from mcp_server_suite.guardrails import (
     ArgumentSanitizer,
@@ -457,35 +457,8 @@ def registry_for(probe: Probe) -> ToolRegistry:
     )
 
 
-class Collector:
-    def __init__(self) -> None:
-        self.messages: dict[Any, dict[str, Any]] = {}
-        self.arrived = asyncio.Event()
-
-    async def write(self, data: bytes, /) -> None:
-        message = json.loads(data)
-        self.messages[message["id"]] = message
-        self.arrived.set()
-
-    async def aclose(self) -> None:
-        return None
-
-
-INIT = {
-    "jsonrpc": "2.0",
-    "id": "init",
-    "method": "initialize",
-    "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {}},
-}
-
-
 def call(request_id: int, arguments: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": "tools/call",
-        "params": {"name": "probe", "arguments": arguments},
-    }
+    return tool_call(request_id, "probe", arguments)
 
 
 async def exchange(
@@ -497,23 +470,13 @@ async def exchange(
     reader = asyncio.StreamReader()
     sink = Collector()
     task = asyncio.create_task(server.serve(reader, sink))
-    for message in (INIT, *messages):
+    for message in (initialize(), *messages):
         reader.feed_data(json.dumps(message).encode() + b"\n")
     if before_eof is not None:
         await before_eof()
     reader.feed_eof()
     await asyncio.wait_for(task, TIMEOUT)
     return sink.messages
-
-
-def in_band_problem(response: dict[str, Any], code: MCPErrorCode) -> dict[str, Any]:
-    result = mcp_types.CallToolResult.model_validate(response["result"])
-    assert result.is_error is True
-    (content,) = response["result"]["content"]
-    problem = ProblemDetail.model_validate_json(content["text"])
-    assert problem.code is code
-    data: dict[str, Any] = json.loads(content["text"])
-    return data
 
 
 def guardrails(**overrides: Any) -> Guardrails:
@@ -584,7 +547,7 @@ async def test_lone_surrogate_argument_round_trips_safely() -> None:
     server = MCPServer(registry_for(probe))
     reader = asyncio.StreamReader()
     sink = Collector()
-    reader.feed_data(json.dumps(INIT).encode() + b"\n")
+    reader.feed_data(json.dumps(initialize()).encode() + b"\n")
     reader.feed_data(
         b'{"jsonrpc":"2.0","id":1,"method":"tools/call",'
         b'"params":{"name":"probe","arguments":{"text":"\\udfff"}}}\n'
@@ -646,7 +609,7 @@ async def test_cancelled_call_frees_its_slot() -> None:
         reader.feed_data(json.dumps(message).encode() + b"\n")
 
     task = asyncio.create_task(server.serve(reader, sink))
-    feed(INIT)
+    feed(initialize())
     feed(call(1, {"text": "x"}))
     await cancel_then_retry(feed)
     reader.feed_eof()

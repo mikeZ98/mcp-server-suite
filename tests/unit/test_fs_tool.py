@@ -17,7 +17,8 @@ import mcp_types
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from mcp_server_suite.core import MCPServer, ToolError, ToolRegistry
+from harness import in_band_problem, run_session, tool_call
+from mcp_server_suite.core import ToolError, ToolRegistry
 from mcp_server_suite.schemas import (
     FS_MAX_BYTES_LIMIT,
     MCPErrorCode,
@@ -536,50 +537,15 @@ def test_tool_requires_configured_root() -> None:
 # ---------------------------------------------------------------------------
 # MCP protocol conformance (through MCPServer)
 # ---------------------------------------------------------------------------
-class Collector:
-    def __init__(self) -> None:
-        self.messages: list[dict[str, Any]] = []
-
-    async def write(self, data: bytes, /) -> None:
-        self.messages.append(json.loads(data))
-
-    async def aclose(self) -> None:
-        return None
-
-
 async def exchange(registry: ToolRegistry, *messages: dict[str, Any]) -> dict[Any, Any]:
-    init = {
-        "jsonrpc": "2.0",
-        "id": "init",
-        "method": "initialize",
-        "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {}},
-    }
-    reader = asyncio.StreamReader()
-    for message in (init, *messages):
-        reader.feed_data(json.dumps(message).encode() + b"\n")
-    reader.feed_eof()
-    sink = Collector()
-    await asyncio.wait_for(MCPServer(registry).serve(reader, sink), TIMEOUT)
-    return {message["id"]: message for message in sink.messages}
+    return await run_session(registry, *messages)
 
 
 def call(request_id: int, arguments: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": "tools/call",
-        "params": {"name": "sandbox_fs_read", "arguments": arguments},
-    }
+    return tool_call(request_id, "sandbox_fs_read", arguments)
 
 
-def tool_problem(response: dict[str, Any], code: MCPErrorCode) -> dict[str, Any]:
-    result = mcp_types.CallToolResult.model_validate(response["result"])
-    assert result.is_error is True
-    assert "structuredContent" not in response["result"]
-    (content,) = response["result"]["content"]
-    assert ProblemDetail.model_validate_json(content["text"]).code is code
-    data: dict[str, Any] = json.loads(content["text"])
-    return data
+tool_problem = in_band_problem
 
 
 @pytest.fixture

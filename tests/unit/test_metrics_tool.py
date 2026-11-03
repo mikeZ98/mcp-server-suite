@@ -16,7 +16,8 @@ import psutil
 import pytest
 from pydantic import ValidationError
 
-from mcp_server_suite.core import MCPServer, ToolRegistry
+from harness import run_session, tool_call
+from mcp_server_suite.core import ToolRegistry
 from mcp_server_suite.schemas import SystemMetricsParams, SystemMetricsResult
 from mcp_server_suite.tools import MetricsSettings, SystemMetricsTool, open_tool_registry
 
@@ -252,43 +253,12 @@ async def test_registry_honours_enabled_flag(monkeypatch: pytest.MonkeyPatch) ->
 # ---------------------------------------------------------------------------
 # MCP protocol conformance (through MCPServer)
 # ---------------------------------------------------------------------------
-class Collector:
-    def __init__(self) -> None:
-        self.messages: dict[Any, dict[str, Any]] = {}
-
-    async def write(self, data: bytes, /) -> None:
-        message = json.loads(data)
-        self.messages[message["id"]] = message
-
-    async def aclose(self) -> None:
-        return None
-
-
 async def exchange(tool: SystemMetricsTool, *messages: dict[str, Any]) -> dict[Any, Any]:
-    init = {
-        "jsonrpc": "2.0",
-        "id": "init",
-        "method": "initialize",
-        "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {}},
-    }
-    reader = asyncio.StreamReader()
-    for message in (init, *messages):
-        reader.feed_data(json.dumps(message).encode() + b"\n")
-    reader.feed_eof()
-    sink = Collector()
-    await asyncio.wait_for(
-        MCPServer(ToolRegistry([tool.definition()])).serve(reader, sink), TIMEOUT
-    )
-    return sink.messages
+    return await run_session(ToolRegistry([tool.definition()]), *messages)
 
 
 def call(request_id: int, arguments: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": "tools/call",
-        "params": {"name": "system_metrics", "arguments": arguments},
-    }
+    return tool_call(request_id, "system_metrics", arguments)
 
 
 async def test_tools_list_advertises_system_metrics(tool: SystemMetricsTool) -> None:
