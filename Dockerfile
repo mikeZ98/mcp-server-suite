@@ -8,7 +8,7 @@
 #     -v mcp-safe-data:/safe_data_dir:ro mcp-server-suite
 #
 # Base images are pinned by digest; bump each tag and digest together.
-ARG PYTHON_IMAGE=python:3.12-slim-trixie@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
+ARG PYTHON_IMAGE=python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a
 
 FROM ${UV_IMAGE} AS uv
@@ -67,6 +67,16 @@ FROM ${PYTHON_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="mcp-server-suite" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.description="Hardened MCP server over stdio: read-only SQL, sandboxed file reads, system metrics."
+
+# Security fixes the pinned base image does not carry yet, pinned to exact versions so
+# the build stays reproducible (a superseded pin fails the build loudly). Drop each
+# line once a newer base digest ships the fixed version.
+#   zlib1g  CVE-2026-85091, CVE-2026-76844  (fixed in trixie-security deb13u1)
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends --only-upgrade \
+      zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1; \
+    rm -rf /var/lib/apt/lists/*
 
 # Unprivileged identity and the sandbox root, then strip the image down:
 # - pip and the ensurepip bootstrap that could reinstall it;
